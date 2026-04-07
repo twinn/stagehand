@@ -10,8 +10,9 @@ defmodule Stagehand.Unique do
 
   @prune_interval 30_000
   @prune_max_age 60
+  @sync_timeout 5_000
 
-  defstruct [:table]
+  defstruct [:table, awaiting_sync: 0, blocked: []]
 
   def start_link(opts) do
     name = opts[:name]
@@ -66,6 +67,41 @@ defmodule Stagehand.Unique do
     GenServer.cast(server, {:prune, max_age})
   end
 
+  @doc """
+  Tell this server to expect `count` sync completions before processing
+  unique checks. Calls to `check_and_insert` will block until all syncs arrive.
+  """
+  @spec await_sync(GenServer.server(), non_neg_integer()) :: :ok
+  def await_sync(server, count) do
+    GenServer.call(server, {:await_sync, count})
+  end
+
+  @doc """
+  Signal that one sync has completed. When all expected syncs are done,
+  blocked `check_and_insert` calls are released.
+  """
+  @spec sync_complete(GenServer.server()) :: :ok
+  def sync_complete(server) do
+    GenServer.call(server, :sync_complete)
+  end
+
+  @doc """
+  Export all entries from this server. Returns a list of
+  `{fingerprint, job, inserted_at}` tuples.
+  """
+  @spec export(GenServer.server()) :: [{non_neg_integer(), Stagehand.Job.t(), integer()}]
+  def export(server) do
+    GenServer.call(server, :export)
+  end
+
+  @doc """
+  Import entries into this server. Existing entries are not overwritten.
+  """
+  @spec import(GenServer.server(), [{non_neg_integer(), Stagehand.Job.t(), integer()}]) :: :ok
+  def import(server, entries) do
+    GenServer.call(server, {:import, entries})
+  end
+
   # -- Callbacks --
 
   @impl true
@@ -76,24 +112,51 @@ defmodule Stagehand.Unique do
   end
 
   @impl true
-  def handle_call({:check_and_insert, fingerprint, job}, _from, state) do
-    unique_opts = job.unique || []
-    period = Keyword.get(unique_opts, :period, 60)
-    states = Keyword.get(unique_opts, :states, [:available, :executing, :scheduled, :retryable])
+  def handle_call({:await_sync, count}, _from, state) do
+    Process.send_after(self(), :sync_timeout, @sync_timeout)
+    {:reply, :ok, %{state | awaiting_sync: count}}
+  end
 
-    case :ets.lookup(state.table, fingerprint) do
-      [{^fingerprint, existing_job, inserted_at}] ->
-        if within_period?(inserted_at, period) and existing_job.state in states do
-          {:reply, {:conflict, existing_job}, state}
-        else
-          :ets.insert(state.table, {fingerprint, job, System.monotonic_time(:second)})
-          {:reply, {:ok, job}, state}
+  def handle_call(:sync_complete, _from, state) do
+    state = %{state | awaiting_sync: state.awaiting_sync - 1}
+
+    state =
+      if state.awaiting_sync <= 0 do
+        for {from, args} <- Enum.reverse(state.blocked) do
+          GenServer.reply(from, do_check_and_insert(state, args))
         end
 
-      [] ->
-        :ets.insert(state.table, {fingerprint, job, System.monotonic_time(:second)})
-        {:reply, {:ok, job}, state}
+        %{state | awaiting_sync: 0, blocked: []}
+      else
+        state
+      end
+
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:check_and_insert, _fp, _job} = args, from, %{awaiting_sync: n} = state) when n > 0 do
+    {:noreply, %{state | blocked: [{from, args} | state.blocked]}}
+  end
+
+  def handle_call({:check_and_insert, _fp, _job} = args, _from, state) do
+    {:reply, do_check_and_insert(state, args), state}
+  end
+
+  def handle_call(:export, _from, state) do
+    entries = :ets.tab2list(state.table)
+    {:reply, entries, state}
+  end
+
+  def handle_call({:import, entries}, _from, state) do
+    for {fingerprint, job, inserted_at} <- entries do
+      # Don't overwrite existing entries
+      case :ets.lookup(state.table, fingerprint) do
+        [] -> :ets.insert(state.table, {fingerprint, job, inserted_at})
+        _ -> :ok
+      end
     end
+
+    {:reply, :ok, state}
   end
 
   @impl true
@@ -108,6 +171,16 @@ defmodule Stagehand.Unique do
   end
 
   @impl true
+  def handle_info(:sync_timeout, %{awaiting_sync: n} = state) when n > 0 do
+    for {from, args} <- Enum.reverse(state.blocked) do
+      GenServer.reply(from, do_check_and_insert(state, args))
+    end
+
+    {:noreply, %{state | awaiting_sync: 0, blocked: []}}
+  end
+
+  def handle_info(:sync_timeout, state), do: {:noreply, state}
+
   def handle_info(:prune, state) do
     do_prune(state.table, @prune_max_age)
     Process.send_after(self(), :prune, @prune_interval)
@@ -115,6 +188,26 @@ defmodule Stagehand.Unique do
   end
 
   # -- Private --
+
+  defp do_check_and_insert(state, {:check_and_insert, fingerprint, job}) do
+    unique_opts = job.unique || []
+    period = Keyword.get(unique_opts, :period, 60)
+    states = Keyword.get(unique_opts, :states, [:available, :executing, :scheduled, :retryable])
+
+    case :ets.lookup(state.table, fingerprint) do
+      [{^fingerprint, existing_job, inserted_at}] ->
+        if within_period?(inserted_at, period) and existing_job.state in states do
+          {:conflict, existing_job}
+        else
+          :ets.insert(state.table, {fingerprint, job, System.monotonic_time(:second)})
+          {:ok, job}
+        end
+
+      [] ->
+        :ets.insert(state.table, {fingerprint, job, System.monotonic_time(:second)})
+        {:ok, job}
+    end
+  end
 
   defp within_period?(_inserted_at, :infinity), do: true
 
