@@ -78,6 +78,35 @@ defmodule Stagehand.UniqueTransferTest do
       assert {:conflict, _} = Unique.check_and_insert(unique_b_name, fingerprint, job)
     end
 
+    test "unique server blocks check_and_insert while awaiting sync" do
+      {:ok, server} = Unique.start_link(name: :"unique_block_#{System.unique_integer([:positive])}")
+
+      # Tell the server to expect syncs from 1 peer
+      Unique.await_sync(server, 1)
+
+      job = %Job{
+        unique: [period: 300, fields: [:worker, :queue, :args]],
+        worker: SomeWorker,
+        queue: "default",
+        args: %{"key" => "blocked"},
+        state: :available
+      }
+
+      fingerprint = Unique.fingerprint(job)
+
+      # check_and_insert should block until sync completes
+      task = Task.async(fn -> Unique.check_and_insert(server, fingerprint, job) end)
+
+      # Not resolved yet
+      refute Task.yield(task, @tick)
+
+      # Complete the sync
+      Unique.sync_complete(server)
+
+      # Now it resolves
+      assert {:ok, _} = Task.await(task, @timeout)
+    end
+
     test "entries transferred away are removed from the source Unique server" do
       # Start two Unique servers
       source_name = :"unique_src_#{System.unique_integer([:positive])}"

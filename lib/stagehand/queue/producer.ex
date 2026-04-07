@@ -99,7 +99,17 @@ defmodule Stagehand.Queue.Producer do
     conf = opts[:conf]
 
     pg_group = {:stagehand, conf.name, :producers, queue}
+    existing = :pg.get_members(:pg, pg_group)
     :pg.monitor(:pg, pg_group)
+
+    # If there are existing producers on other nodes, tell Unique to block
+    # check_and_insert until all of them have synced their entries to us.
+    remote_count = Enum.count(existing, &(node(&1) != node()))
+
+    if remote_count > 0 do
+      unique_name = Module.concat(conf.name, Stagehand.Unique)
+      Stagehand.Unique.await_sync(unique_name, remote_count)
+    end
 
     state = %__MODULE__{
       queue: queue,
@@ -228,9 +238,21 @@ defmodule Stagehand.Queue.Producer do
     {:stop, :normal, state}
   end
 
-  def handle_info({_ref, :join, _group, _pids}, state) do
+  def handle_info({_ref, :join, _group, pids}, state) do
     pg_key = {:stagehand, state.conf.name, :producers, state.queue}
     sync_unique_entries(state, PgRegistry.get_members(:pg, pg_key))
+
+    # Signal sync complete to new producers' Unique servers
+    unique_name = Module.concat(state.conf.name, Stagehand.Unique)
+
+    for pid <- pids, node(pid) != node() do
+      try do
+        Stagehand.Unique.sync_complete({unique_name, node(pid)})
+      catch
+        :exit, _ -> :ok
+      end
+    end
+
     {:noreply, [], state}
   end
 
