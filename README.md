@@ -1,11 +1,20 @@
 # Stagehand
 
-**TODO: Add description**
+GenStage-based background job processing for Elixir. In-memory, no database required.
+
+## Why
+
+Most job processing libraries require a database. Stagehand doesn't. It's built on GenStage and runs entirely in-memory, making it a good fit for applications that need background job processing without the overhead of external dependencies.
+
+## Guarantees
+
+- **Graceful shutdown** — executing jobs complete before the node stops. The producer drains in-flight work within a configurable grace period.
+- **No new work during shutdown** — the producer leaves the pg group before draining, so no new jobs are routed to a stopping node.
+- **Job redistribution** — on shutdown, scheduled and queued jobs are redistributed to surviving producers on other nodes. On a single-node deploy, these jobs are lost.
+- **At-most-once delivery** — each job runs at most once. Jobs are in-memory with no persistence, so a VM crash loses queued, scheduled, and executing jobs.
+- **Unique jobs (best effort)** — deduplication is backed by a local ETS table and consistent hashing routes the same job to the same producer. On graceful topology changes (deploys, scaling), dedup entries are transferred to the new owner and removed from the old one. On crashes, entries on the lost node are gone and duplicates are possible until the uniqueness period expires.
 
 ## Installation
-
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `stagehand` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
@@ -15,7 +24,82 @@ def deps do
 end
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/stagehand>.
+## Configuration
 
+```elixir
+# config/config.exs
+config :my_app, Stagehand,
+  queues: [default: 10, mailers: 20],
+  plugins: [
+    {Stagehand.Plugins.Cron, crontab: [
+      {"* * * * *", MyApp.MinuteWorker},
+      {"@daily", MyApp.DailyWorker}
+    ]}
+  ]
+
+# config/test.exs
+config :my_app, Stagehand, testing: :manual
+```
+
+Add Stagehand to your supervision tree:
+
+```elixir
+children = [
+  {Stagehand, otp_app: :my_app}
+]
+```
+
+## Workers
+
+```elixir
+defmodule MyApp.EmailWorker do
+  use Stagehand.Worker, queue: :mailers, max_attempts: 5
+
+  @impl true
+  def perform(%Stagehand.Job{args: %{"to" => to, "body" => body}}) do
+    MyApp.Mailer.send(to, body)
+    :ok
+  end
+end
+```
+
+Insert jobs:
+
+```elixir
+%{"to" => "user@example.com", "body" => "hello"}
+|> MyApp.EmailWorker.new()
+|> Stagehand.insert()
+```
+
+### Return values
+
+- `:ok` or `{:ok, value}` — job succeeded
+- `{:error, reason}` — job failed, will retry if attempts remain
+- `{:snooze, seconds}` — re-enqueue after delay
+- `{:cancel, reason}` — stop, no more retries
+
+### Options
+
+- `:queue` — queue name (default `:default`)
+- `:max_attempts` — retry limit (default `20`)
+- `:priority` — 0-9, lower is higher (default `0`)
+- `:unique` — uniqueness config or `false`
+- `:schedule_in` — delay in seconds or `{amount, :seconds | :minutes | :hours | :days}`
+- `:scheduled_at` — specific `DateTime`
+
+## Testing
+
+```elixir
+# config/test.exs
+config :my_app, Stagehand, testing: :manual
+```
+
+```elixir
+Stagehand.Testing.assert_enqueued(Stagehand, worker: MyApp.EmailWorker)
+Stagehand.Testing.refute_enqueued(Stagehand, worker: MyApp.OtherWorker)
+Stagehand.Testing.perform_job(MyApp.EmailWorker, %{"to" => "test@example.com"})
+```
+
+## License
+
+MIT

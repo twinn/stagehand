@@ -98,6 +98,9 @@ defmodule Stagehand.Queue.Producer do
     queue = opts[:queue]
     conf = opts[:conf]
 
+    pg_group = {:stagehand, conf.name, :producers, queue}
+    :pg.monitor(:pg, pg_group)
+
     state = %__MODULE__{
       queue: queue,
       conf: conf
@@ -225,6 +228,22 @@ defmodule Stagehand.Queue.Producer do
     {:stop, :normal, state}
   end
 
+  def handle_info({_ref, :join, _group, _pids}, state) do
+    sync_unique_entries(state)
+    {:noreply, [], state}
+  end
+
+  def handle_info({_ref, :leave, _group, _pids}, state) do
+    {:noreply, [], state}
+  end
+
+  def handle_info({:unique_sync, target}, state) do
+    unique_name = Module.concat(state.conf.name, Stagehand.Unique)
+    entries = Stagehand.Unique.export(unique_name)
+    if entries != [], do: Stagehand.Unique.import(target, entries)
+    {:noreply, [], state}
+  end
+
   def handle_info(_msg, state) do
     {:noreply, [], state}
   end
@@ -241,9 +260,45 @@ defmodule Stagehand.Queue.Producer do
     end
 
     redistribute_jobs(state)
+    sync_unique_entries(state)
 
     Stagehand.Telemetry.queue_shutdown(state.queue)
     :ok
+  end
+
+  defp sync_unique_entries(state) do
+    unique_name = Module.concat(state.conf.name, Stagehand.Unique)
+    pg_key = {:stagehand, state.conf.name, :producers, state.queue}
+    all_producers = PgRegistry.get_members(:pg, pg_key)
+    entries = Stagehand.Unique.export(unique_name)
+
+    do_sync_unique(unique_name, entries, all_producers)
+  end
+
+  defp do_sync_unique(_unique_name, [], _producers), do: :ok
+  defp do_sync_unique(_unique_name, _entries, producers) when length(producers) < 2, do: :ok
+
+  defp do_sync_unique(unique_name, entries, producers) do
+    ring = Enum.reduce(producers, HashRing.new(), &HashRing.add_node(&2, &1))
+
+    remote =
+      for {fp, _job, _ts} = entry <- entries,
+          owner = HashRing.key_to_node(ring, fp),
+          owner != self(),
+          node(owner) != node(),
+          reduce: %{} do
+        acc -> Map.update(acc, node(owner), [entry], &[entry | &1])
+      end
+
+    for {remote_node, batch} <- remote do
+      try do
+        Stagehand.Unique.import({unique_name, remote_node}, batch)
+      catch
+        :exit, _ -> :ok
+      end
+
+      Enum.each(batch, fn {fp, _, _} -> Stagehand.Unique.remove(unique_name, fp) end)
+    end
   end
 
   defp wait_for_executing(0, _remaining), do: :ok

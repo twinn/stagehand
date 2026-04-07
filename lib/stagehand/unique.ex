@@ -66,6 +66,23 @@ defmodule Stagehand.Unique do
     GenServer.cast(server, {:prune, max_age})
   end
 
+  @doc """
+  Export all entries from this server. Returns a list of
+  `{fingerprint, job, inserted_at}` tuples.
+  """
+  @spec export(GenServer.server()) :: [{non_neg_integer(), Stagehand.Job.t(), integer()}]
+  def export(server) do
+    GenServer.call(server, :export)
+  end
+
+  @doc """
+  Import entries into this server. Existing entries are not overwritten.
+  """
+  @spec import(GenServer.server(), [{non_neg_integer(), Stagehand.Job.t(), integer()}]) :: :ok
+  def import(server, entries) do
+    GenServer.call(server, {:import, entries})
+  end
+
   # -- Callbacks --
 
   @impl true
@@ -94,6 +111,23 @@ defmodule Stagehand.Unique do
         :ets.insert(state.table, {fingerprint, job, System.monotonic_time(:second)})
         {:reply, {:ok, job}, state}
     end
+  end
+
+  def handle_call(:export, _from, state) do
+    entries = :ets.tab2list(state.table)
+    {:reply, entries, state}
+  end
+
+  def handle_call({:import, entries}, _from, state) do
+    for {fingerprint, job, inserted_at} <- entries do
+      # Don't overwrite existing entries
+      case :ets.lookup(state.table, fingerprint) do
+        [] -> :ets.insert(state.table, {fingerprint, job, inserted_at})
+        _ -> :ok
+      end
+    end
+
+    {:reply, :ok, state}
   end
 
   @impl true
