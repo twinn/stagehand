@@ -12,7 +12,7 @@ Most job processing libraries require a database. Stagehand doesn't. It's built 
 - **No new work during shutdown** — the producer leaves the pg group before draining, so no new jobs are routed to a stopping node.
 - **Job redistribution** — on shutdown, scheduled and queued jobs are redistributed to surviving producers on other nodes. On a single-node deploy, these jobs are lost.
 - **At-most-once delivery** — each job runs at most once. Jobs are in-memory with no persistence, so a VM crash loses queued, scheduled, and executing jobs.
-- **Unique jobs (best effort)** — deduplication is backed by a local ETS table and consistent hashing routes the same job to the same producer. On graceful topology changes (deploys, scaling), dedup entries are transferred to the new owner and removed from the old one. On crashes, entries on the lost node are gone and duplicates are possible until the uniqueness period expires.
+- **Unique jobs (best effort)** — deduplication is backed by a local ETS table. A consistent hash ring routes the same job fingerprint to the same producer. When a node joins or leaves, the ring only remaps keys that belong to the changed node — all other fingerprints stay on their current owner, keeping their dedup state intact. On graceful topology changes (deploys, scaling), the remapped entries are transferred to the new owner. There is a small window during transfers where a duplicate could slip through — the new producer can receive jobs before the dedup entries arrive. On crashes, entries on the lost node are gone and duplicates are possible until the uniqueness period expires.
 
 ## Installation
 
