@@ -9,10 +9,10 @@ Most job processing libraries require a database. Stagehand doesn't. It's built 
 ## Guarantees
 
 - **Graceful shutdown** — executing jobs complete before the node stops. The producer drains in-flight work within a configurable grace period.
-- **No new work during shutdown** — the producer leaves the pg group before draining, so no new jobs are routed to a stopping node.
-- **Job redistribution** — on shutdown, scheduled and queued jobs are redistributed to surviving producers on other nodes. On a single-node deploy, these jobs are lost.
+- **No new work during shutdown** — the producer leaves the pg group before draining, so no new jobs are routed to a stopping node. Any messages already in flight are drained from the mailbox before redistribution.
+- **Job redistribution** — on shutdown, scheduled, queued, and in-flight jobs are redistributed to surviving producers on other nodes. On a single-node deploy, these jobs are lost.
 - **At-most-once delivery** — each job runs at most once. Jobs are in-memory with no persistence, so a VM crash loses queued, scheduled, and executing jobs.
-- **Unique jobs (best effort)** — deduplication is backed by a local ETS table. A consistent hash ring routes the same job fingerprint to the same producer. When a node joins or leaves, the ring only remaps keys that belong to the changed node — all other fingerprints stay on their current owner, keeping their dedup state intact. On graceful topology changes (deploys, scaling), the remapped entries are transferred to the new owner. There is a small window during transfers where a duplicate could slip through — the new producer can receive jobs before the dedup entries arrive. On crashes, entries on the lost node are gone and duplicates are possible until the uniqueness period expires.
+- **Unique jobs (best effort)** — deduplication is backed by a local ETS table. A consistent hash ring routes the same job fingerprint to the same producer. When a node joins or leaves, the ring only remaps keys that belong to the changed node — all other fingerprints stay on their current owner, keeping their dedup state intact. On graceful shutdown, dedup entries are transferred to their new owners before the producer leaves the group, so no duplicates slip through. When a new node joins, there is a small window where a duplicate could arrive before existing producers finish transferring entries. On crashes, entries on the lost node are gone and duplicates are possible until the uniqueness period expires.
 
 ## Installation
 

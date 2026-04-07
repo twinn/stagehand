@@ -229,7 +229,8 @@ defmodule Stagehand.Queue.Producer do
   end
 
   def handle_info({_ref, :join, _group, _pids}, state) do
-    sync_unique_entries(state)
+    pg_key = {:stagehand, state.conf.name, :producers, state.queue}
+    sync_unique_entries(state, PgRegistry.get_members(:pg, pg_key))
     {:noreply, [], state}
   end
 
@@ -250,26 +251,44 @@ defmodule Stagehand.Queue.Producer do
 
   @impl true
   def terminate(_reason, state) do
-    # Leave the pg group first so no new jobs are routed to us.
     pg_key = {:stagehand, state.conf.name, :producers, state.queue}
+
+    # Snapshot membership while we're still in the group (needed for hash ring)
+    all_producers = PgRegistry.get_members(:pg, pg_key)
+
+    # Leave so no new jobs are routed to us
     PgRegistry.unregister_name({:pg, pg_key})
 
+    # Drain any in-flight enqueue messages that arrived before we left
+    state = drain_mailbox(state)
+
+    # Transfer unique entries using the snapshotted membership
+    sync_unique_entries(state, all_producers)
+
+    # Wait for executing jobs to finish
     if state.executing > 0 do
       grace = if state.conf, do: state.conf.shutdown_grace_period, else: 15_000
       wait_for_executing(state.executing, grace)
     end
 
-    redistribute_jobs(state)
-    sync_unique_entries(state)
+    # Redistribute available and scheduled jobs to survivors
+    redistribute_jobs(state, all_producers -- [self()])
 
     Stagehand.Telemetry.queue_shutdown(state.queue)
     :ok
   end
 
-  defp sync_unique_entries(state) do
+  defp drain_mailbox(state) do
+    receive do
+      {:enqueue, %Stagehand.Job{} = job} ->
+        drain_mailbox(%{state | available: :queue.in(job, state.available)})
+    after
+      0 -> state
+    end
+  end
+
+  defp sync_unique_entries(state, all_producers) do
     unique_name = Module.concat(state.conf.name, Stagehand.Unique)
-    pg_key = {:stagehand, state.conf.name, :producers, state.queue}
-    all_producers = PgRegistry.get_members(:pg, pg_key)
     entries = Stagehand.Unique.export(unique_name)
 
     do_sync_unique(unique_name, entries, all_producers)
@@ -319,7 +338,7 @@ defmodule Stagehand.Queue.Producer do
 
   # -- Private --
 
-  defp redistribute_jobs(state) do
+  defp redistribute_jobs(state, producers) do
     scheduled_jobs =
       for {_ref, {timer_ref, job}} <- state.scheduled do
         Process.cancel_timer(timer_ref)
@@ -327,8 +346,6 @@ defmodule Stagehand.Queue.Producer do
       end
 
     jobs = scheduled_jobs ++ :queue.to_list(state.available)
-    pg_key = {:stagehand, state.conf.name, :producers, state.queue}
-    producers = PgRegistry.get_members(:pg, pg_key) -- [self()]
     count = length(producers)
 
     for {job, i} <- Enum.with_index(jobs), count > 0 do
