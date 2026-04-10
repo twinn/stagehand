@@ -48,7 +48,9 @@ defmodule Stagehand.Plugins.CronTest do
   end
 
   defp cron_pid(name) do
-    [{pid, _}] = Registry.lookup(Module.concat(name, Registry), :cron)
+    highlander_pid = :global.whereis_name({Highlander, {Cron, name}})
+    %{pid: sup_pid} = :sys.get_state(highlander_pid)
+    [{_, pid, _, _}] = Supervisor.which_children(sup_pid)
     pid
   end
 

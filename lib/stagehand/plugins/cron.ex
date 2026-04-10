@@ -43,9 +43,7 @@ defmodule Stagehand.Plugins.Cron do
   end
 
   def start_link(opts) do
-    conf = opts[:conf]
-    name = {:via, Registry, {Module.concat(conf.name, Registry), :cron}}
-    GenServer.start_link(__MODULE__, opts, name: name)
+    GenServer.start_link(__MODULE__, opts)
   end
 
   @impl true
