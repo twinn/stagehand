@@ -43,8 +43,7 @@ defmodule Stagehand.Router do
     unique_server = Module.concat(conf.name, Unique)
     fingerprint = Unique.fingerprint(job)
 
-    ring = Enum.reduce(producers, HashRing.new(), &HashRing.add_node(&2, &1))
-    producer_pid = HashRing.key_to_node(ring, fingerprint)
+    producer_pid = rendezvous(producers, fingerprint)
 
     case Unique.check_and_insert(unique_server, fingerprint, job) do
       {:ok, job} ->
@@ -53,6 +52,11 @@ defmodule Stagehand.Router do
       {:conflict, existing_job} ->
         {:ok, %{existing_job | conflict?: true}}
     end
+  end
+
+  @doc false
+  def rendezvous(nodes, key) do
+    Enum.max_by(nodes, fn node -> :erlang.phash2({node, key}) end)
   end
 
   defp schedule_delay(%Job{scheduled_at: nil}), do: 0

@@ -41,7 +41,6 @@ defmodule Stagehand.MixProject do
     [
       {:crontab, "~> 1.1"},
       {:gen_stage, "~> 1.2"},
-      {:libring, "~> 1.7"},
       {:highlander, "~> 0.2"},
       {:pg_registry, "~> 0.4"},
       {:telemetry, "~> 1.0"},

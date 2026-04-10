@@ -323,11 +323,9 @@ defmodule Stagehand.Queue.Producer do
   defp do_sync_unique(_unique_name, _entries, producers) when length(producers) < 2, do: :ok
 
   defp do_sync_unique(unique_name, entries, producers) do
-    ring = Enum.reduce(producers, HashRing.new(), &HashRing.add_node(&2, &1))
-
     remote =
       for {fp, _job, _ts} = entry <- entries,
-          owner = HashRing.key_to_node(ring, fp),
+          owner = Stagehand.Router.rendezvous(producers, fp),
           owner != self(),
           node(owner) != node(),
           reduce: %{} do
