@@ -48,7 +48,6 @@ defmodule Stagehand.Plugins.Cron do
 
   @impl true
   def init(opts) do
-    Process.flag(:trap_exit, true)
     conf = opts[:conf]
 
     crontab =
