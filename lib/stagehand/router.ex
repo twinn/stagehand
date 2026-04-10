@@ -1,9 +1,10 @@
 defmodule Stagehand.Router do
   @moduledoc """
-  Routes jobs to the correct producer.
+  Routes jobs to producers.
 
-  - Normal jobs: random producer from the :pg group
-  - Unique jobs: consistent hash → deterministic producer
+  Normal jobs are sent to a random producer for the queue. Unique jobs
+  are routed deterministically via rendezvous hashing so that the same
+  fingerprint always reaches the same producer.
   """
 
   alias Stagehand.Job
@@ -12,7 +13,7 @@ defmodule Stagehand.Router do
   alias Stagehand.Unique
 
   @doc """
-  Route and insert a job.
+  Routes a job to a producer and inserts it.
   """
   @spec route(Job.t(), Stagehand.Config.t()) :: {:ok, Job.t()} | {:error, :no_producers}
   def route(%Job{} = job, conf) do

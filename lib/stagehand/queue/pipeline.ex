@@ -1,10 +1,11 @@
 defmodule Stagehand.Queue.Pipeline do
   @moduledoc """
-  Supervisor for a single queue's GenStage pipeline: ConsumerSupervisor + Producer.
+  Supervisor for a single queue's GenStage pipeline.
 
-  Children are ordered so that on shutdown (reverse order) the Producer
-  stops first — leaving the pg group and draining executing jobs — before
-  the ConsumerSupervisor is stopped.
+  Manages a `ConsumerSupervisor` and a `Producer`. On shutdown, the
+  producer stops first (reverse child order), leaves the cluster
+  registry, and drains executing jobs before the consumer supervisor
+  is stopped.
   """
 
   use Supervisor
@@ -75,7 +76,7 @@ defmodule Stagehand.Queue.Pipeline do
   end
 
   @doc """
-  Get the consumer supervisor process name.
+  Returns the consumer supervisor process name.
   """
   @spec consumer_name(atom(), atom() | binary()) :: {:via, module(), term()}
   def consumer_name(stagehand_name, queue) do

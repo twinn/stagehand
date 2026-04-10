@@ -1,8 +1,8 @@
 defmodule Stagehand.Queue.ConsumerSupervisor do
   @moduledoc """
   ConsumerSupervisor that spawns an Executor task for each job received
-  from the Producer. Starts without a subscription — the Producer calls
-  `GenStage.async_subscribe/2` after joining the pg group.
+  from the Producer. Starts without a subscription; the Producer calls
+  `GenStage.async_subscribe/2` after registering with the cluster.
   """
 
   use ConsumerSupervisor

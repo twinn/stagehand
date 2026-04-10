@@ -1,7 +1,9 @@
 defmodule Stagehand.Supervisor do
   @moduledoc """
-  Top-level supervisor for a Stagehand instance. Manages the registry,
-  hash ring, unique server, queue manager, and plugins.
+  Top-level supervisor for a Stagehand instance.
+
+  Manages the local process registry, unique job deduplication server,
+  queue pipelines, and plugins.
   """
 
   use Supervisor

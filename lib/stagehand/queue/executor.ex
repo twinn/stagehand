@@ -14,7 +14,7 @@ defmodule Stagehand.Queue.Executor do
   alias Stagehand.Telemetry
 
   @doc """
-  Execute a job. This is the entry point called by the ConsumerSupervisor.
+  Executes a job. Called by the `ConsumerSupervisor` for each dispatched job.
   """
   @spec run(Job.t()) :: term()
   def run(%Job{worker: worker} = job) do
