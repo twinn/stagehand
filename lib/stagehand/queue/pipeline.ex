@@ -43,9 +43,9 @@ defmodule Stagehand.Queue.Pipeline do
         type: :supervisor,
         shutdown: shutdown_grace
       },
-      # Producer starts second — {:via, PgRegistry, ...} joins the pg
-      # group automatically. On shutdown (reverse order) it stops first,
-      # leaves the group in terminate, then drains executing jobs.
+      # Producer starts second and registers with PgRegistry in init/1.
+      # On shutdown (reverse order) it stops first, leaves the group in
+      # terminate, then drains executing jobs.
       %{
         id: Producer,
         start:
@@ -71,7 +71,7 @@ defmodule Stagehand.Queue.Pipeline do
   """
   @spec producer_name(atom(), atom() | binary()) :: {:via, module(), term()}
   def producer_name(stagehand_name, queue) do
-    {:via, PgRegistry, {:pg, {:stagehand, stagehand_name, :producers, to_string(queue)}}}
+    {:via, Registry, {Module.concat(stagehand_name, Registry), {:producer, to_string(queue)}}}
   end
 
   @doc """
@@ -79,7 +79,7 @@ defmodule Stagehand.Queue.Pipeline do
   """
   @spec producers_for_queue(atom(), atom() | binary()) :: [pid()]
   def producers_for_queue(stagehand_name, queue) do
-    PgRegistry.get_members(:pg, {:stagehand, stagehand_name, :producers, to_string(queue)})
+    for {pid, _} <- PgRegistry.lookup(:stagehand, {:stagehand, stagehand_name, :producers, to_string(queue)}), do: pid
   end
 
   @doc """

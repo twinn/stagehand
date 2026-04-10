@@ -41,7 +41,7 @@ defmodule Stagehand.MixProject do
       {:crontab, "~> 1.1"},
       {:gen_stage, "~> 1.2"},
       {:libring, "~> 1.7"},
-      {:pg_registry, "~> 0.2.2"},
+      {:pg_registry, "~> 0.4"},
       {:telemetry, "~> 1.0"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:styler, "~> 1.11", only: [:dev, :test], runtime: false},

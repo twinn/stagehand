@@ -48,7 +48,10 @@ defmodule Stagehand.Plugins.CronTest do
   end
 
   defp cron_pid(name) do
-    PgRegistry.whereis_name({:pg, {:stagehand_cron, name}})
+    case PgRegistry.lookup(:stagehand, {:stagehand_cron, name}) do
+      [{pid, _}] -> pid
+      [] -> nil
+    end
   end
 
   defp tick(pid) do
@@ -132,10 +135,9 @@ defmodule Stagehand.Plugins.CronTest do
           crontab: [{"* * * * *", EveryMinuteWorker}]
         )
 
-      :pg.join(:pg, {:stagehand_cron, name}, cron2)
-
-      members = PgRegistry.get_members(:pg, {:stagehand_cron, name})
+      members = for {pid, _} <- PgRegistry.lookup(:stagehand, {:stagehand_cron, name}), do: pid
       assert length(members) == 2
+      assert cron2 in members
 
       leader = Enum.min(members)
       non_leader = Enum.max(members)

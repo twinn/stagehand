@@ -1,2 +1,2 @@
-:pg.start(:pg)
+PgRegistry.Pg.start(:stagehand)
 ExUnit.start()
