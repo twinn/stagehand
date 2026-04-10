@@ -16,7 +16,7 @@ defmodule Stagehand.MixProject do
 
   def cli do
     [
-      preferred_envs: [ci: :test, precommit: :test]
+      preferred_envs: [precommit: :test]
     ]
   end
 
@@ -29,7 +29,6 @@ defmodule Stagehand.MixProject do
 
   defp aliases do
     [
-      ci: ["format --check-formatted", "credo --strict", "test"],
       precommit: ["format", "credo --strict", "test"]
     ]
   end
