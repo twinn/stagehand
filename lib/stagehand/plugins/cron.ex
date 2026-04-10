@@ -38,7 +38,7 @@ defmodule Stagehand.Plugins.Cron do
   @impl true
   def init(opts) do
     conf = opts[:conf]
-    {:ok, _} = PgRegistry.register(:stagehand, {:stagehand_cron, conf.name}, nil)
+    {:ok, _} = PgRegistry.register(Stagehand.PgRegistry, {:stagehand_cron, conf.name}, nil)
 
     crontab =
       opts
@@ -73,7 +73,7 @@ defmodule Stagehand.Plugins.Cron do
   # -- Private --
 
   defp leader?(%{conf: conf}) do
-    pids = for {pid, _} <- PgRegistry.lookup(:stagehand, {:stagehand_cron, conf.name}), do: pid
+    pids = for {pid, _} <- PgRegistry.lookup(Stagehand.PgRegistry, {:stagehand_cron, conf.name}), do: pid
 
     case pids do
       [] -> true

@@ -20,7 +20,7 @@ defmodule Stagehand.Supervisor do
     # Ensure the shared PgRegistry scope is running. If it's already
     # started (by another Stagehand instance or the application), this
     # is a no-op.
-    case PgRegistry.start_link(:stagehand) do
+    case PgRegistry.start_link(Stagehand.PgRegistry) do
       {:ok, _} -> :ok
       {:error, {:already_started, _}} -> :ok
     end

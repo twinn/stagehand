@@ -48,7 +48,7 @@ defmodule Stagehand.Plugins.CronTest do
   end
 
   defp cron_pid(name) do
-    case PgRegistry.lookup(:stagehand, {:stagehand_cron, name}) do
+    case PgRegistry.lookup(Stagehand.PgRegistry, {:stagehand_cron, name}) do
       [{pid, _}] -> pid
       [] -> nil
     end
@@ -135,7 +135,7 @@ defmodule Stagehand.Plugins.CronTest do
           crontab: [{"* * * * *", EveryMinuteWorker}]
         )
 
-      members = for {pid, _} <- PgRegistry.lookup(:stagehand, {:stagehand_cron, name}), do: pid
+      members = for {pid, _} <- PgRegistry.lookup(Stagehand.PgRegistry, {:stagehand_cron, name}), do: pid
       assert length(members) == 2
       assert cron2 in members
 
