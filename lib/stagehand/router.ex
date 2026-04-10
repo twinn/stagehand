@@ -45,8 +45,9 @@ defmodule Stagehand.Router do
     fingerprint = Unique.fingerprint(job)
 
     producer_pid = rendezvous(producers, fingerprint)
+    target_unique = {unique_server, node(producer_pid)}
 
-    case Unique.check_and_insert(unique_server, fingerprint, job) do
+    case Unique.check_and_insert(target_unique, fingerprint, job) do
       {:ok, job} ->
         route_normal(job, producer_pid)
 

@@ -1,0 +1,118 @@
+defmodule Stagehand.ClusterTest do
+  use ExUnit.Case, async: true
+
+  alias Stagehand.Queue.Pipeline
+  alias Stagehand.Test.Cluster
+
+  setup_all do
+    {peer, peer_node} = Cluster.spawn_peer()
+    {:ok, peer: peer, peer_node: peer_node}
+  end
+
+  setup %{peer: peer, peer_node: peer_node} do
+    # Restart peer if a previous test stopped it
+    {peer, peer_node} =
+      if Node.ping(peer_node) == :pong do
+        {peer, peer_node}
+      else
+        Cluster.spawn_peer()
+      end
+
+    name = :"stagehand_cluster_#{:erlang.unique_integer([:positive])}"
+
+    start_supervised!(
+      {Stagehand, name: name, queues: [default: 3], shutdown_grace_period: 5_000},
+      id: name
+    )
+
+    pg_key = {:stagehand, name, :producers, "default"}
+    {ref, _} = PgRegistry.monitor(Stagehand.ProducerRegistry, pg_key)
+
+    {:ok, _} =
+      Cluster.start_stagehand(peer_node, name,
+        queues: [default: 3],
+        shutdown_grace_period: 5_000
+      )
+
+    assert_receive {^ref, :join, ^pg_key, [{pid, _}]} when node(pid) == peer_node, 5_000
+    PgRegistry.demonitor(Stagehand.ProducerRegistry, ref)
+
+    {:ok, name: name, peer: peer, peer_node: peer_node}
+  end
+
+  describe "producer discovery" do
+    test "both nodes see each other's producers", %{name: name, peer_node: peer_node} do
+      local_producers = Pipeline.producers_for_queue(name, "default")
+      remote_producers = :erpc.call(peer_node, Pipeline, :producers_for_queue, [name, "default"])
+
+      assert length(local_producers) == 2
+      assert length(remote_producers) == 2
+
+      local_nodes = local_producers |> Enum.map(&node/1) |> Enum.sort()
+      assert node() in local_nodes
+      assert peer_node in local_nodes
+    end
+
+    test "producers_for_queue returns only local after peer stops", %{name: name, peer: peer, peer_node: peer_node} do
+      assert length(Pipeline.producers_for_queue(name, "default")) == 2
+
+      pg_key = {:stagehand, name, :producers, "default"}
+      {ref, _} = PgRegistry.monitor(Stagehand.ProducerRegistry, pg_key)
+
+      :peer.stop(peer)
+
+      assert_receive {^ref, :leave, ^pg_key, [{pid, _}]} when node(pid) == peer_node, 5_000
+      PgRegistry.demonitor(Stagehand.ProducerRegistry, ref)
+
+      producers = Pipeline.producers_for_queue(name, "default")
+      assert length(producers) == 1
+      assert node(hd(producers)) == node()
+    end
+  end
+
+  describe "unique job dedup across nodes" do
+    test "same unique fingerprint is deduplicated", %{name: name, peer_node: peer_node} do
+      job = %Stagehand.Job{
+        worker: SomeWorker,
+        queue: "default",
+        args: %{"key" => "cluster_unique"},
+        unique: [period: 300, fields: [:worker, :queue, :args]],
+        state: :available
+      }
+
+      {:ok, first} = Stagehand.insert(name, job)
+      refute first.conflict?
+
+      {:ok, second} = :erpc.call(peer_node, Stagehand, :insert, [name, job])
+      assert second.conflict?
+    end
+  end
+
+  describe "graceful shutdown" do
+    test "peer shutdown transfers unique entries to survivor", %{name: name, peer_node: peer_node} do
+      job = %Stagehand.Job{
+        worker: SomeWorker,
+        queue: "default",
+        args: %{"key" => "transfer_me"},
+        unique: [period: 300, fields: [:worker, :queue, :args]],
+        state: :available
+      }
+
+      {:ok, _} = Stagehand.insert(name, job)
+
+      pg_key = {:stagehand, name, :producers, "default"}
+      {ref, _} = PgRegistry.monitor(Stagehand.ProducerRegistry, pg_key)
+
+      :erpc.call(peer_node, Supervisor, :stop, [name])
+
+      assert_receive {^ref, :leave, ^pg_key, [{pid, _}]} when node(pid) == peer_node, 5_000
+      PgRegistry.demonitor(Stagehand.ProducerRegistry, ref)
+
+      unique_name = Module.concat(name, Stagehand.Unique)
+      _ = :sys.get_state(unique_name)
+
+      {:ok, duplicate} = Stagehand.insert(name, job)
+      assert duplicate.conflict?
+    end
+  end
+end

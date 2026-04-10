@@ -318,19 +318,18 @@ defmodule Stagehand.Queue.Producer do
   defp sync_unique_entries(state, all_producers) do
     unique_name = Module.concat(state.conf.name, Stagehand.Unique)
     entries = Stagehand.Unique.export(unique_name)
+    survivors = all_producers -- [self()]
 
-    do_sync_unique(unique_name, entries, all_producers)
+    do_sync_unique(unique_name, entries, survivors)
   end
 
   defp do_sync_unique(_unique_name, [], _producers), do: :ok
-  defp do_sync_unique(_unique_name, _entries, producers) when length(producers) < 2, do: :ok
+  defp do_sync_unique(_unique_name, _entries, []), do: :ok
 
-  defp do_sync_unique(unique_name, entries, producers) do
+  defp do_sync_unique(unique_name, entries, survivors) do
     remote =
       for {fp, _job, _ts} = entry <- entries,
-          owner = Stagehand.Router.rendezvous(producers, fp),
-          owner != self(),
-          node(owner) != node(),
+          owner = Stagehand.Router.rendezvous(survivors, fp),
           reduce: %{} do
         acc -> Map.update(acc, node(owner), [entry], &[entry | &1])
       end
