@@ -281,11 +281,21 @@ defmodule Stagehand.Queue.Producer do
   def terminate(_reason, state) do
     pg_key = {:stagehand, state.conf.name, :producers, state.queue}
 
-    # Snapshot membership while we're still in the group (needed for hash ring)
-    all_producers = for {pid, _} <- PgRegistry.lookup(Stagehand.ProducerRegistry, pg_key), do: pid
+    # Snapshot membership while we're still in the group (needed for hash ring).
+    # During node shutdown, the PgRegistry ETS table may already be gone.
+    all_producers =
+      try do
+        for {pid, _} <- PgRegistry.lookup(Stagehand.ProducerRegistry, pg_key), do: pid
+      catch
+        :error, :badarg -> []
+      end
 
     # Leave so no new jobs are routed to us
-    PgRegistry.unregister(Stagehand.ProducerRegistry, pg_key)
+    try do
+      PgRegistry.unregister(Stagehand.ProducerRegistry, pg_key)
+    catch
+      :error, :badarg -> :ok
+    end
 
     # Drain any in-flight enqueue messages that arrived before we left
     state = drain_mailbox(state)
@@ -318,18 +328,18 @@ defmodule Stagehand.Queue.Producer do
   defp sync_unique_entries(state, all_producers) do
     unique_name = Module.concat(state.conf.name, Stagehand.Unique)
     entries = Stagehand.Unique.export(unique_name)
+    survivors = all_producers -- [self()]
 
-    do_sync_unique(unique_name, entries, all_producers)
+    do_sync_unique(unique_name, entries, survivors)
   end
 
   defp do_sync_unique(_unique_name, [], _producers), do: :ok
-  defp do_sync_unique(_unique_name, _entries, producers) when length(producers) < 2, do: :ok
+  defp do_sync_unique(_unique_name, _entries, []), do: :ok
 
-  defp do_sync_unique(unique_name, entries, producers) do
+  defp do_sync_unique(unique_name, entries, survivors) do
     remote =
       for {fp, _job, _ts} = entry <- entries,
-          owner = Stagehand.Router.rendezvous(producers, fp),
-          owner != self(),
+          owner = Stagehand.Router.rendezvous(survivors, fp),
           node(owner) != node(),
           reduce: %{} do
         acc -> Map.update(acc, node(owner), [entry], &[entry | &1])
