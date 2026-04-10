@@ -1,7 +1,10 @@
 defmodule Stagehand.Queue.Producer do
   @moduledoc """
-  GenStage producer for a single queue. Thin demand buffer — receives jobs,
-  queues them, dispatches when consumers have demand.
+  GenStage producer for a single queue.
+
+  Receives jobs, buffers them in a priority queue, and dispatches to
+  consumers as demand arrives. Registers with `PgRegistry` for
+  cluster-wide discovery.
   """
 
   use GenStage
@@ -24,7 +27,7 @@ defmodule Stagehand.Queue.Producer do
   end
 
   @doc """
-  Enqueue a job into this producer.
+  Enqueues a job into this producer.
   """
   @spec enqueue(GenServer.server(), Stagehand.Job.t()) :: {:ok, Stagehand.Job.t()}
   def enqueue(producer, %Stagehand.Job{} = job) do
@@ -32,7 +35,7 @@ defmodule Stagehand.Queue.Producer do
   end
 
   @doc """
-  Schedule a job to be enqueued after `delay_ms` milliseconds.
+  Schedules a job to be enqueued after `delay_ms` milliseconds.
   The timer is tracked so the job can be redistributed on shutdown.
   """
   @spec schedule(GenServer.server(), Stagehand.Job.t(), non_neg_integer()) :: {:ok, Stagehand.Job.t()}
@@ -41,7 +44,7 @@ defmodule Stagehand.Queue.Producer do
   end
 
   @doc """
-  Cancel a job by ref. Removes from available queue if present.
+  Cancels a job by ref. Removes from the available queue if present.
   """
   @spec cancel(GenServer.server(), reference()) :: :ok | :not_found
   def cancel(producer, ref) when is_reference(ref) do
@@ -49,7 +52,7 @@ defmodule Stagehand.Queue.Producer do
   end
 
   @doc """
-  Pause this queue — stops dispatching jobs.
+  Pauses this queue. Jobs continue to be accepted but are not dispatched.
   """
   @spec pause(GenServer.server()) :: :ok
   def pause(producer) do
@@ -57,7 +60,7 @@ defmodule Stagehand.Queue.Producer do
   end
 
   @doc """
-  Resume a paused queue.
+  Resumes a paused queue and dispatches any buffered jobs.
   """
   @spec resume(GenServer.server()) :: :ok
   def resume(producer) do
@@ -65,8 +68,8 @@ defmodule Stagehand.Queue.Producer do
   end
 
   @doc """
-  Update the concurrency limit (handled by the consumer supervisor, not here).
-  Returns current queue info.
+  Returns current queue info including pause state, available count,
+  and executing count.
   """
   @spec check(GenServer.server()) :: map()
   def check(producer) do
@@ -74,7 +77,7 @@ defmodule Stagehand.Queue.Producer do
   end
 
   @doc """
-  Drain all available jobs synchronously. Returns the list of jobs.
+  Drains all available jobs synchronously. Returns the list of jobs.
   """
   @spec drain(GenServer.server()) :: [Stagehand.Job.t()]
   def drain(producer) do
@@ -82,7 +85,7 @@ defmodule Stagehand.Queue.Producer do
   end
 
   @doc """
-  Initiate graceful shutdown. Stops accepting new jobs and waits for
+  Initiates graceful shutdown. Stops accepting new jobs and waits for
   executing jobs to finish before terminating.
   """
   @spec shutdown(GenServer.server()) :: :ok

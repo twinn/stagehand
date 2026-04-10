@@ -1,7 +1,6 @@
 defmodule Stagehand do
   @moduledoc """
-  Stagehand is a GenStage-based background job processing library,
-  In-memory, no database required.
+  An in-memory, GenStage-based background job processing library.
 
   ## Configuration
 
@@ -37,7 +36,7 @@ defmodule Stagehand do
   alias Stagehand.Router
 
   @doc """
-  Start a Stagehand supervision tree.
+  Starts a Stagehand supervision tree.
   """
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts) when is_list(opts) do
@@ -56,7 +55,7 @@ defmodule Stagehand do
   end
 
   @doc """
-  Insert a job for execution.
+  Inserts a job for execution.
   """
   @spec insert(atom(), Stagehand.Job.t()) :: {:ok, Stagehand.Job.t()} | {:error, term()}
   def insert(name \\ __MODULE__, %Stagehand.Job{} = job) do
@@ -76,7 +75,7 @@ defmodule Stagehand do
   end
 
   @doc """
-  Insert multiple jobs at once.
+  Inserts multiple jobs at once.
   """
   @spec insert_all(atom(), [Stagehand.Job.t()]) :: {:ok, [Stagehand.Job.t()]} | {:error, [term()]}
   def insert_all(name \\ __MODULE__, jobs) when is_list(jobs) do
@@ -93,7 +92,7 @@ defmodule Stagehand do
   end
 
   @doc """
-  Cancel a job by its ref. For available jobs, removes from the producer.
+  Cancels a job by its ref. For available jobs, removes from the producer.
   Returns `:ok` on success or `{:error, :not_found}`.
   """
   @spec cancel_job(atom(), Stagehand.Job.t()) :: :ok | {:error, :not_found} | :not_found
@@ -114,7 +113,7 @@ defmodule Stagehand do
   end
 
   @doc """
-  Retry a job by re-inserting it.
+  Retries a job by re-inserting it.
   """
   @spec retry_job(atom(), Stagehand.Job.t()) :: {:ok, Stagehand.Job.t()} | {:error, term()}
   def retry_job(name \\ __MODULE__, %Stagehand.Job{} = job) do
@@ -122,7 +121,7 @@ defmodule Stagehand do
   end
 
   @doc """
-  Pause a queue. Broadcasts to all producers for this queue.
+  Pauses a queue across all producers in the cluster.
   """
   @spec pause_queue(atom(), keyword()) :: :ok
   def pause_queue(name \\ __MODULE__, opts) do
@@ -136,7 +135,7 @@ defmodule Stagehand do
   end
 
   @doc """
-  Resume a paused queue. Broadcasts to all producers for this queue.
+  Resumes a paused queue across all producers in the cluster.
   """
   @spec resume_queue(atom(), keyword()) :: :ok
   def resume_queue(name \\ __MODULE__, opts) do
@@ -150,7 +149,7 @@ defmodule Stagehand do
   end
 
   @doc """
-  Drain a queue, returning all pending jobs from all producers.
+  Drains a queue, returning all pending jobs from all producers.
   """
   @spec drain_queue(atom(), keyword()) :: [Stagehand.Job.t()]
   def drain_queue(name \\ __MODULE__, opts) do
@@ -162,7 +161,7 @@ defmodule Stagehand do
   end
 
   @doc """
-  Check the status of a queue across all producers.
+  Returns the aggregated status of a queue across all producers.
   """
   @spec check_queue(atom(), keyword()) :: map()
   def check_queue(name \\ __MODULE__, opts) do
@@ -182,7 +181,7 @@ defmodule Stagehand do
   end
 
   @doc """
-  Get the configuration for a Stagehand instance.
+  Returns the configuration for a Stagehand instance.
   """
   @spec config(atom()) :: Config.t() | {:error, {:not_running, atom()}}
   def config(name \\ __MODULE__) do

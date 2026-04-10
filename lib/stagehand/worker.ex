@@ -50,7 +50,7 @@ defmodule Stagehand.Worker do
       @stagehand_opts opts
 
       @doc """
-      Build a new job struct for this worker.
+      Builds a new job struct for this worker.
       """
       def new(args, runtime_opts \\ []) do
         Stagehand.Worker.build_job(__MODULE__, @stagehand_opts, args, runtime_opts)

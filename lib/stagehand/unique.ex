@@ -2,8 +2,9 @@ defmodule Stagehand.Unique do
   @moduledoc """
   Unique job deduplication using a local ETS table.
 
-  Each node owns its own ETS table. Consistent hashing ensures the same
-  unique job always routes to the same node, so the dedup check is local.
+  Each node owns its own deduplication table. Rendezvous hashing ensures
+  the same job fingerprint always routes to the same node, keeping the
+  dedup check local.
   """
 
   use GenServer
@@ -20,7 +21,7 @@ defmodule Stagehand.Unique do
   end
 
   @doc """
-  Generate a fingerprint for a job based on its unique configuration.
+  Generates a fingerprint for a job based on its unique configuration.
   """
   @spec fingerprint(Stagehand.Job.t()) :: non_neg_integer() | nil
   def fingerprint(%Stagehand.Job{unique: nil}), do: nil
@@ -41,8 +42,8 @@ defmodule Stagehand.Unique do
   end
 
   @doc """
-  Check for an existing job with the same fingerprint. If none found,
-  insert the fingerprint. Returns `{:ok, job}` or `{:conflict, existing}`.
+  Checks for an existing job with the same fingerprint. If none is found,
+  inserts the fingerprint. Returns `{:ok, job}` or `{:conflict, existing}`.
   """
   @spec check_and_insert(GenServer.server(), non_neg_integer(), Stagehand.Job.t()) ::
           {:ok, Stagehand.Job.t()} | {:conflict, Stagehand.Job.t()}
@@ -51,8 +52,8 @@ defmodule Stagehand.Unique do
   end
 
   @doc """
-  Remove a fingerprint entry (called when a unique job completes and
-  its period has expired).
+  Removes a fingerprint entry. Called when a unique job completes and
+  its period has expired.
   """
   @spec remove(GenServer.server(), non_neg_integer()) :: :ok
   def remove(server, fingerprint) do
@@ -60,7 +61,7 @@ defmodule Stagehand.Unique do
   end
 
   @doc """
-  Prune expired entries older than `max_age` seconds.
+  Prunes expired entries older than `max_age` seconds.
   """
   @spec prune(GenServer.server(), pos_integer()) :: :ok
   def prune(server, max_age) do
@@ -68,8 +69,8 @@ defmodule Stagehand.Unique do
   end
 
   @doc """
-  Tell this server to expect `count` sync completions before processing
-  unique checks. Calls to `check_and_insert` will block until all syncs arrive.
+  Blocks unique checks until `count` sync completions have been received.
+  Calls to `check_and_insert/3` block until all syncs arrive.
   """
   @spec await_sync(GenServer.server(), non_neg_integer()) :: :ok
   def await_sync(server, count) do
@@ -77,8 +78,8 @@ defmodule Stagehand.Unique do
   end
 
   @doc """
-  Signal that one sync has completed. When all expected syncs are done,
-  blocked `check_and_insert` calls are released.
+  Signals that one sync has completed. When all expected syncs have
+  arrived, blocked `check_and_insert/3` calls are released.
   """
   @spec sync_complete(GenServer.server()) :: :ok
   def sync_complete(server) do
@@ -86,7 +87,7 @@ defmodule Stagehand.Unique do
   end
 
   @doc """
-  Export all entries from this server. Returns a list of
+  Exports all entries from this server as a list of
   `{fingerprint, job, inserted_at}` tuples.
   """
   @spec export(GenServer.server()) :: [{non_neg_integer(), Stagehand.Job.t(), integer()}]
@@ -95,7 +96,7 @@ defmodule Stagehand.Unique do
   end
 
   @doc """
-  Import entries into this server. Existing entries are not overwritten.
+  Imports entries into this server. Existing entries are not overwritten.
   """
   @spec import(GenServer.server(), [{non_neg_integer(), Stagehand.Job.t(), integer()}]) :: :ok
   def import(server, entries) do

@@ -35,9 +35,9 @@ defmodule Stagehand.Config do
   ]
 
   @doc """
-  Build a config struct from the given options.
+  Builds a config struct from the given options.
 
-  Options can be passed directly or read from Application config:
+  Options can be passed directly or read from application config:
 
       Config.new(otp_app: :my_app, name: Stagehand)
   """

@@ -22,7 +22,7 @@ defmodule Stagehand.Testing do
   """
 
   @doc """
-  Record a job in manual testing mode (called internally by `Stagehand.insert/2`).
+  Records a job in manual testing mode. Called internally by `Stagehand.insert/2`.
   """
   @spec record_job(atom(), Stagehand.Job.t()) :: Stagehand.Job.t()
   def record_job(name, job) do
@@ -56,7 +56,7 @@ defmodule Stagehand.Testing do
   end
 
   @doc """
-  Refute that any job matching the given opts was enqueued.
+  Asserts that no job matching the given opts was enqueued.
   """
   @spec refute_enqueued(atom(), keyword()) :: :ok
   def refute_enqueued(name \\ Stagehand, opts) do
@@ -71,7 +71,7 @@ defmodule Stagehand.Testing do
   end
 
   @doc """
-  Get all enqueued jobs matching the given opts.
+  Returns all enqueued jobs matching the given opts.
   """
   @spec all_enqueued(atom(), keyword()) :: [Stagehand.Job.t()]
   def all_enqueued(name \\ Stagehand, opts \\ []) do
@@ -84,7 +84,7 @@ defmodule Stagehand.Testing do
   end
 
   @doc """
-  Build and execute a job directly for testing. Returns the result of `perform/1`.
+  Builds and executes a job directly for testing. Returns the result of `perform/1`.
   """
   @spec perform_job(module(), map(), keyword()) :: term()
   def perform_job(worker, args, opts \\ []) do
@@ -94,7 +94,7 @@ defmodule Stagehand.Testing do
   end
 
   @doc """
-  Clear all recorded jobs for the given instance.
+  Clears all recorded jobs for the given instance.
   """
   @spec drain_jobs(atom()) :: :ok
   def drain_jobs(name \\ Stagehand) do
