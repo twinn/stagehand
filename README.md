@@ -19,13 +19,14 @@ discovery and `Highlander` for singleton scheduling.
 - **At-most-once delivery** — each job runs at most once. Jobs are
   in-memory with no persistence; a VM crash loses queued, scheduled,
   and executing jobs.
-- **Unique jobs (best effort)** — deduplication is backed by a local ETS
+- **Unique jobs (best effort)** — deduplication is backed by an ETS
   table per node. Rendezvous hashing routes the same job fingerprint to
-  the same producer, keeping dedup checks local. On graceful shutdown,
-  dedup entries are transferred to their new owners. On node join,
-  unique checks are blocked until all existing producers have synced
-  their entries. On crashes, entries on the lost node are gone and
-  duplicates are possible until the uniqueness period expires.
+  the same node, and the dedup check runs on that node's Unique server.
+  On graceful shutdown, dedup entries are transferred to surviving
+  nodes. On node join, unique checks are blocked until all existing
+  producers have synced their entries. On crashes, entries on the lost
+  node are gone and duplicates are possible until the uniqueness period
+  expires.
 
 ## Installation
 

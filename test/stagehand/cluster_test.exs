@@ -1,14 +1,25 @@
 defmodule Stagehand.ClusterTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Stagehand.Test.Cluster
   alias Stagehand.Queue.Pipeline
 
-  setup do
-    name = :"stagehand_cluster_#{:erlang.unique_integer([:positive])}"
+  setup_all do
     {peer, peer_node} = Cluster.spawn_peer()
+    {:ok, peer: peer, peer_node: peer_node}
+  end
 
-    # Start local stagehand and subscribe to producer joins
+  setup %{peer: peer, peer_node: peer_node} do
+    # Restart peer if a previous test stopped it
+    {peer, peer_node} =
+      if Node.ping(peer_node) == :pong do
+        {peer, peer_node}
+      else
+        Cluster.spawn_peer()
+      end
+
+    name = :"stagehand_cluster_#{:erlang.unique_integer([:positive])}"
+
     start_supervised!(
       {Stagehand, name: name, queues: [default: 3], shutdown_grace_period: 5_000},
       id: name
@@ -17,7 +28,6 @@ defmodule Stagehand.ClusterTest do
     pg_key = {:stagehand, name, :producers, "default"}
     {ref, _} = PgRegistry.monitor(Stagehand.ProducerRegistry, pg_key)
 
-    # Start remote stagehand — wait for its producer to appear locally
     {:ok, _} = Cluster.start_stagehand(peer_node, name,
       queues: [default: 3],
       shutdown_grace_period: 5_000
@@ -25,14 +35,6 @@ defmodule Stagehand.ClusterTest do
 
     assert_receive {^ref, :join, ^pg_key, [{pid, _}]} when node(pid) == peer_node, 5_000
     PgRegistry.demonitor(Stagehand.ProducerRegistry, ref)
-
-    on_exit(fn ->
-      try do
-        :peer.stop(peer)
-      catch
-        :exit, _ -> :ok
-      end
-    end)
 
     {:ok, name: name, peer: peer, peer_node: peer_node}
   end
@@ -58,7 +60,6 @@ defmodule Stagehand.ClusterTest do
 
       :peer.stop(peer)
 
-      # Wait for PgRegistry to process the leave
       assert_receive {^ref, :leave, ^pg_key, [{pid, _}]} when node(pid) == peer_node, 5_000
       PgRegistry.demonitor(Stagehand.ProducerRegistry, ref)
 
@@ -98,9 +99,6 @@ defmodule Stagehand.ClusterTest do
 
       {:ok, _} = Stagehand.insert(name, job)
 
-      # Subscribe to leave events, then stop the remote Stagehand
-      # gracefully so the producer transfers entries while PgRegistry
-      # is still running.
       pg_key = {:stagehand, name, :producers, "default"}
       {ref, _} = PgRegistry.monitor(Stagehand.ProducerRegistry, pg_key)
 
@@ -109,8 +107,6 @@ defmodule Stagehand.ClusterTest do
       assert_receive {^ref, :leave, ^pg_key, [{pid, _}]} when node(pid) == peer_node, 5_000
       PgRegistry.demonitor(Stagehand.ProducerRegistry, ref)
 
-      # Drain the local Unique server mailbox to ensure the import
-      # from the dying producer has been processed.
       unique_name = Module.concat(name, Stagehand.Unique)
       _ = :sys.get_state(unique_name)
 
