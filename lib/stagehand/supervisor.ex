@@ -17,14 +17,6 @@ defmodule Stagehand.Supervisor do
     registry_name = Module.concat(conf.name, Registry)
     unique_name = Module.concat(conf.name, Stagehand.Unique)
 
-    # Ensure the shared PgRegistry scope is running. If it's already
-    # started (by another Stagehand instance or the application), this
-    # is a no-op.
-    case PgRegistry.start_link(Stagehand.ProducerRegistry) do
-      {:ok, _} -> :ok
-      {:error, {:already_started, _}} -> :ok
-    end
-
     children =
       [
         {Registry, keys: :unique, name: registry_name},
