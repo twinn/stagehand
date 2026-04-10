@@ -92,7 +92,10 @@ defmodule Stagehand.Unique do
   """
   @spec export(GenServer.server()) :: [{non_neg_integer(), Stagehand.Job.t(), integer()}]
   def export(server) do
-    GenServer.call(server, :export)
+    case GenServer.whereis(server) do
+      nil -> []
+      pid -> GenServer.call(pid, :export)
+    end
   end
 
   @doc """
