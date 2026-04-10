@@ -55,8 +55,8 @@ defmodule Stagehand.Router do
   end
 
   @doc false
-  def rendezvous(nodes, key) do
-    Enum.max_by(nodes, fn node -> :erlang.phash2({node, key}) end)
+  def rendezvous(pids, key) do
+    Enum.max_by(pids, fn pid -> :erlang.phash2({node(pid), key}) end)
   end
 
   defp schedule_delay(%Job{scheduled_at: nil}), do: 0
