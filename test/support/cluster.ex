@@ -18,7 +18,7 @@ defmodule Stagehand.Test.Cluster do
   end
 
   def start_stagehand(node, name, opts \\ []) do
-    queues = Keyword.get(opts, :queues, [default: 5])
+    queues = Keyword.get(opts, :queues, default: 5)
     grace = Keyword.get(opts, :shutdown_grace_period, 5_000)
     caller = self()
 
@@ -26,9 +26,12 @@ defmodule Stagehand.Test.Cluster do
     # Stagehand supervision tree. erpc callers are short-lived and
     # their exit kills linked children.
     Node.spawn(node, fn ->
-      {:ok, _} = Stagehand.start_link(
-        name: name, queues: queues, shutdown_grace_period: grace
-      )
+      {:ok, _} =
+        Stagehand.start_link(
+          name: name,
+          queues: queues,
+          shutdown_grace_period: grace
+        )
 
       send(caller, {:stagehand_started, name})
       Process.sleep(:infinity)

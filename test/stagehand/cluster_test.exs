@@ -1,8 +1,8 @@
 defmodule Stagehand.ClusterTest do
   use ExUnit.Case, async: true
 
-  alias Stagehand.Test.Cluster
   alias Stagehand.Queue.Pipeline
+  alias Stagehand.Test.Cluster
 
   setup_all do
     {peer, peer_node} = Cluster.spawn_peer()
@@ -28,10 +28,11 @@ defmodule Stagehand.ClusterTest do
     pg_key = {:stagehand, name, :producers, "default"}
     {ref, _} = PgRegistry.monitor(Stagehand.ProducerRegistry, pg_key)
 
-    {:ok, _} = Cluster.start_stagehand(peer_node, name,
-      queues: [default: 3],
-      shutdown_grace_period: 5_000
-    )
+    {:ok, _} =
+      Cluster.start_stagehand(peer_node, name,
+        queues: [default: 3],
+        shutdown_grace_period: 5_000
+      )
 
     assert_receive {^ref, :join, ^pg_key, [{pid, _}]} when node(pid) == peer_node, 5_000
     PgRegistry.demonitor(Stagehand.ProducerRegistry, ref)
@@ -47,7 +48,7 @@ defmodule Stagehand.ClusterTest do
       assert length(local_producers) == 2
       assert length(remote_producers) == 2
 
-      local_nodes = Enum.map(local_producers, &node/1) |> Enum.sort()
+      local_nodes = local_producers |> Enum.map(&node/1) |> Enum.sort()
       assert node() in local_nodes
       assert peer_node in local_nodes
     end
