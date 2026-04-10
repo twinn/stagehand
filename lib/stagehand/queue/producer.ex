@@ -281,21 +281,11 @@ defmodule Stagehand.Queue.Producer do
   def terminate(_reason, state) do
     pg_key = {:stagehand, state.conf.name, :producers, state.queue}
 
-    # Snapshot membership while we're still in the group (needed for hash ring).
-    # During node shutdown, the PgRegistry ETS table may already be gone.
-    all_producers =
-      try do
-        for {pid, _} <- PgRegistry.lookup(Stagehand.ProducerRegistry, pg_key), do: pid
-      catch
-        :error, :badarg -> []
-      end
+    # Snapshot membership while we're still in the group (needed for hash ring)
+    all_producers = for {pid, _} <- PgRegistry.lookup(Stagehand.ProducerRegistry, pg_key), do: pid
 
     # Leave so no new jobs are routed to us
-    try do
-      PgRegistry.unregister(Stagehand.ProducerRegistry, pg_key)
-    catch
-      :error, :badarg -> :ok
-    end
+    PgRegistry.unregister(Stagehand.ProducerRegistry, pg_key)
 
     # Drain any in-flight enqueue messages that arrived before we left
     state = drain_mailbox(state)
@@ -340,7 +330,6 @@ defmodule Stagehand.Queue.Producer do
     remote =
       for {fp, _job, _ts} = entry <- entries,
           owner = Stagehand.Router.rendezvous(survivors, fp),
-          node(owner) != node(),
           reduce: %{} do
         acc -> Map.update(acc, node(owner), [entry], &[entry | &1])
       end
