@@ -19,8 +19,8 @@ defmodule Stagehand.Queue.Producer do
   ]
 
   def start_link(opts) do
-    name = opts[:name]
-    GenStage.start_link(__MODULE__, opts, name: name)
+    server_opts = if opts[:name], do: [name: opts[:name]], else: []
+    GenStage.start_link(__MODULE__, opts, server_opts)
   end
 
   @doc """
@@ -100,8 +100,9 @@ defmodule Stagehand.Queue.Producer do
     conf = opts[:conf]
 
     pg_group = {:stagehand, conf.name, :producers, queue}
-    existing = :pg.get_members(:pg, pg_group)
-    :pg.monitor(:pg, pg_group)
+    {:ok, _} = PgRegistry.register(Stagehand.ProducerRegistry, pg_group, nil)
+    {_ref, existing} = PgRegistry.monitor(Stagehand.ProducerRegistry, pg_group)
+    existing = for {pid, _} <- existing, do: pid
 
     # If there are existing producers on other nodes, tell Unique to block
     # check_and_insert until all of them have synced their entries to us.
@@ -239,14 +240,15 @@ defmodule Stagehand.Queue.Producer do
     {:stop, :normal, state}
   end
 
-  def handle_info({_ref, :join, _group, pids}, state) do
+  def handle_info({_ref, :join, _group, entries}, state) do
     pg_key = {:stagehand, state.conf.name, :producers, state.queue}
-    sync_unique_entries(state, PgRegistry.get_members(:pg, pg_key))
+    members = for {pid, _} <- PgRegistry.lookup(Stagehand.ProducerRegistry, pg_key), do: pid
+    sync_unique_entries(state, members)
 
     # Signal sync complete to new producers' Unique servers
     unique_name = Module.concat(state.conf.name, Stagehand.Unique)
 
-    for pid <- pids, node(pid) != node() do
+    for {pid, _} <- entries, node(pid) != node() do
       try do
         Stagehand.Unique.sync_complete({unique_name, node(pid)})
       catch
@@ -257,7 +259,7 @@ defmodule Stagehand.Queue.Producer do
     {:noreply, [], state}
   end
 
-  def handle_info({_ref, :leave, _group, _pids}, state) do
+  def handle_info({_ref, :leave, _group, _entries}, state) do
     {:noreply, [], state}
   end
 
@@ -277,10 +279,10 @@ defmodule Stagehand.Queue.Producer do
     pg_key = {:stagehand, state.conf.name, :producers, state.queue}
 
     # Snapshot membership while we're still in the group (needed for hash ring)
-    all_producers = PgRegistry.get_members(:pg, pg_key)
+    all_producers = for {pid, _} <- PgRegistry.lookup(Stagehand.ProducerRegistry, pg_key), do: pid
 
     # Leave so no new jobs are routed to us
-    PgRegistry.unregister_name({:pg, pg_key})
+    PgRegistry.unregister(Stagehand.ProducerRegistry, pg_key)
 
     # Drain any in-flight enqueue messages that arrived before we left
     state = drain_mailbox(state)
@@ -321,11 +323,9 @@ defmodule Stagehand.Queue.Producer do
   defp do_sync_unique(_unique_name, _entries, producers) when length(producers) < 2, do: :ok
 
   defp do_sync_unique(unique_name, entries, producers) do
-    ring = Enum.reduce(producers, HashRing.new(), &HashRing.add_node(&2, &1))
-
     remote =
       for {fp, _job, _ts} = entry <- entries,
-          owner = HashRing.key_to_node(ring, fp),
+          owner = Stagehand.Router.rendezvous(producers, fp),
           owner != self(),
           node(owner) != node(),
           reduce: %{} do
