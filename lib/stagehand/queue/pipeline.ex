@@ -23,7 +23,6 @@ defmodule Stagehand.Queue.Pipeline do
     conf = opts[:conf]
     limit = opts[:limit] || 10
 
-    producer_name = producer_name(conf.name, queue)
     consumer_name = consumer_name(conf.name, queue)
 
     shutdown_grace = conf.shutdown_grace_period + 1_000
@@ -52,7 +51,6 @@ defmodule Stagehand.Queue.Pipeline do
           {Producer, :start_link,
            [
              [
-               name: producer_name,
                queue: queue,
                conf: conf,
                consumer: consumer_name,
@@ -67,15 +65,7 @@ defmodule Stagehand.Queue.Pipeline do
   end
 
   @doc """
-  Local producer name (for consumer subscription on the same node).
-  """
-  @spec producer_name(atom(), atom() | binary()) :: {:via, module(), term()}
-  def producer_name(stagehand_name, queue) do
-    {:via, Registry, {Module.concat(stagehand_name, Registry), {:producer, to_string(queue)}}}
-  end
-
-  @doc """
-  Get all producer pids for a queue across the cluster.
+  Returns all producer pids for a queue across the cluster.
   """
   @spec producers_for_queue(atom(), atom() | binary()) :: [pid()]
   def producers_for_queue(stagehand_name, queue) do

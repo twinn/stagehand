@@ -19,8 +19,8 @@ defmodule Stagehand.Queue.Producer do
   ]
 
   def start_link(opts) do
-    name = opts[:name]
-    GenStage.start_link(__MODULE__, opts, name: name)
+    server_opts = if opts[:name], do: [name: opts[:name]], else: []
+    GenStage.start_link(__MODULE__, opts, server_opts)
   end
 
   @doc """
