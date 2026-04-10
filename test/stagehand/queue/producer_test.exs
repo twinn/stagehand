@@ -86,4 +86,32 @@ defmodule Stagehand.Queue.ProducerTest do
       assert info.executing == 0
     end
   end
+
+  describe "priority" do
+    test "higher priority jobs are drained before lower priority", %{producer: producer} do
+      Producer.pause(producer)
+
+      Producer.enqueue(producer, %Job{worker: SomeWorker, args: %{"id" => "low"}, priority: 5})
+      Producer.enqueue(producer, %Job{worker: SomeWorker, args: %{"id" => "high"}, priority: 0})
+      Producer.enqueue(producer, %Job{worker: SomeWorker, args: %{"id" => "mid"}, priority: 3})
+
+      jobs = Producer.drain(producer)
+      ids = Enum.map(jobs, & &1.args["id"])
+
+      assert ids == ["high", "mid", "low"]
+    end
+
+    test "same priority preserves insertion order", %{producer: producer} do
+      Producer.pause(producer)
+
+      Producer.enqueue(producer, %Job{worker: SomeWorker, args: %{"id" => "first"}, priority: 0})
+      Producer.enqueue(producer, %Job{worker: SomeWorker, args: %{"id" => "second"}, priority: 0})
+      Producer.enqueue(producer, %Job{worker: SomeWorker, args: %{"id" => "third"}, priority: 0})
+
+      jobs = Producer.drain(producer)
+      ids = Enum.map(jobs, & &1.args["id"])
+
+      assert ids == ["first", "second", "third"]
+    end
+  end
 end

@@ -9,10 +9,11 @@ defmodule Stagehand.Queue.Producer do
   defstruct [
     :queue,
     :conf,
-    available: :queue.new(),
+    available: :gb_trees.empty(),
     scheduled: %{},
     executing: 0,
     pending_demand: 0,
+    sequence: 0,
     paused: false,
     shutting_down: false
   ]
@@ -126,7 +127,7 @@ defmodule Stagehand.Queue.Producer do
   @impl true
   def handle_call({:enqueue, job}, _from, state) do
     job = assign_ref(job)
-    state = %{state | available: :queue.in(job, state.available)}
+    state = enqueue_available(state, job)
 
     {events, state} = dispatch(state)
     {:reply, {:ok, job}, events, state}
@@ -157,7 +158,7 @@ defmodule Stagehand.Queue.Producer do
     info = %{
       queue: state.queue,
       paused: state.paused,
-      available: :queue.len(state.available),
+      available: :gb_trees.size(state.available),
       scheduled: map_size(state.scheduled),
       executing: state.executing
     }
@@ -166,8 +167,8 @@ defmodule Stagehand.Queue.Producer do
   end
 
   def handle_call(:drain, _from, state) do
-    jobs = :queue.to_list(state.available)
-    state = %{state | available: :queue.new()}
+    jobs = :gb_trees.values(state.available)
+    state = %{state | available: :gb_trees.empty()}
     {:reply, jobs, [], state}
   end
 
@@ -208,7 +209,7 @@ defmodule Stagehand.Queue.Producer do
     case Map.pop(state.scheduled, ref) do
       {{_timer_ref, job}, scheduled} ->
         job = %{job | state: :available}
-        state = %{state | scheduled: scheduled, available: :queue.in(job, state.available)}
+        state = enqueue_available(%{state | scheduled: scheduled}, job)
         {events, state} = dispatch(state)
         {:noreply, events, state}
 
@@ -218,7 +219,7 @@ defmodule Stagehand.Queue.Producer do
   end
 
   def handle_info({:enqueue, %Stagehand.Job{} = job}, state) do
-    state = %{state | available: :queue.in(job, state.available)}
+    state = enqueue_available(state, job)
     {events, state} = dispatch(state)
     {:noreply, events, state}
   end
@@ -303,7 +304,7 @@ defmodule Stagehand.Queue.Producer do
   defp drain_mailbox(state) do
     receive do
       {:enqueue, %Stagehand.Job{} = job} ->
-        drain_mailbox(%{state | available: :queue.in(job, state.available)})
+        drain_mailbox(enqueue_available(state, job))
     after
       0 -> state
     end
@@ -367,7 +368,7 @@ defmodule Stagehand.Queue.Producer do
         job
       end
 
-    jobs = scheduled_jobs ++ :queue.to_list(state.available)
+    jobs = scheduled_jobs ++ :gb_trees.values(state.available)
     count = length(producers)
 
     for {job, i} <- Enum.with_index(jobs), count > 0 do
@@ -390,6 +391,22 @@ defmodule Stagehand.Queue.Producer do
     %{job | ref: make_ref(), producer_pid: self()}
   end
 
+  defp enqueue_available(state, job) do
+    key = {job.priority, state.sequence}
+    tree = :gb_trees.insert(key, job, state.available)
+    %{state | available: tree, sequence: state.sequence + 1}
+  end
+
+  defp delete_from_available(tree, ref) do
+    tree
+    |> :gb_trees.to_list()
+    |> Enum.find(fn {_key, job} -> job.ref == ref end)
+    |> case do
+      {key, _job} -> {:ok, :gb_trees.delete(key, tree)}
+      nil -> :not_found
+    end
+  end
+
   defp dispatch(%{paused: true} = state), do: {[], state}
   defp dispatch(%{pending_demand: 0} = state), do: {[], state}
 
@@ -407,29 +424,28 @@ defmodule Stagehand.Queue.Producer do
     {events, state}
   end
 
-  defp take_jobs(queue, 0, acc), do: {Enum.reverse(acc), queue, 0}
+  defp take_jobs(tree, 0, acc), do: {Enum.reverse(acc), tree, 0}
 
-  defp take_jobs(queue, demand, acc) do
-    case :queue.out(queue) do
-      {{:value, job}, rest} ->
-        take_jobs(rest, demand - 1, [job | acc])
-
-      {:empty, queue} ->
-        {Enum.reverse(acc), queue, demand}
+  defp take_jobs(tree, demand, acc) do
+    if :gb_trees.is_empty(tree) do
+      {Enum.reverse(acc), tree, demand}
+    else
+      {_key, job, rest} = :gb_trees.take_smallest(tree)
+      take_jobs(rest, demand - 1, [job | acc])
     end
   end
 
   defp do_cancel(ref, state) do
     with {nil, _} <- Map.pop(state.scheduled, ref),
-         {_kept, []} <- Enum.split_with(:queue.to_list(state.available), &(&1.ref != ref)) do
+         :not_found <- delete_from_available(state.available, ref) do
       {:not_found, state}
     else
       {{timer_ref, _job}, scheduled} ->
         Process.cancel_timer(timer_ref)
         {:ok, %{state | scheduled: scheduled}}
 
-      {remaining, [_removed | _]} ->
-        {:ok, %{state | available: :queue.from_list(remaining)}}
+      {:ok, available} ->
+        {:ok, %{state | available: available}}
     end
   end
 end
