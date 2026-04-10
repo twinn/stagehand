@@ -69,7 +69,9 @@ defmodule Stagehand.Queue.Pipeline do
   """
   @spec producers_for_queue(atom(), atom() | binary()) :: [pid()]
   def producers_for_queue(stagehand_name, queue) do
-    for {pid, _} <- PgRegistry.lookup(Stagehand.ProducerRegistry, {:stagehand, stagehand_name, :producers, to_string(queue)}), do: pid
+    for {pid, _} <-
+          PgRegistry.lookup(Stagehand.ProducerRegistry, {:stagehand, stagehand_name, :producers, to_string(queue)}),
+        do: pid
   end
 
   @doc """
