@@ -1,5 +1,5 @@
 defmodule Stagehand.Plugins.CronTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Stagehand.Plugins.Cron
 
@@ -48,10 +48,8 @@ defmodule Stagehand.Plugins.CronTest do
   end
 
   defp cron_pid(name) do
-    case PgRegistry.lookup(Stagehand.PgRegistry, {:stagehand_cron, name}) do
-      [{pid, _}] -> pid
-      [] -> nil
-    end
+    [{pid, _}] = Registry.lookup(Module.concat(name, Registry), :cron)
+    pid
   end
 
   defp tick(pid) do
@@ -64,7 +62,6 @@ defmodule Stagehand.Plugins.CronTest do
     test "inserts jobs matching the current minute" do
       name = start_stagehand(crontab: [{"* * * * *", EveryMinuteWorker}])
 
-      # Trigger a tick manually instead of waiting for the real timer
       tick(cron_pid(name))
 
       jobs = Stagehand.Testing.all_enqueued(name, worker: EveryMinuteWorker)
@@ -105,8 +102,6 @@ defmodule Stagehand.Plugins.CronTest do
   describe "aliases" do
     test "@daily alias is parsed" do
       name = start_stagehand(crontab: [{"@daily", HourlyWorker}])
-
-      # If parsing failed, start_supervised would have crashed
       assert is_pid(cron_pid(name))
     end
 
@@ -116,39 +111,16 @@ defmodule Stagehand.Plugins.CronTest do
     end
   end
 
-  describe "leader election" do
-    test "only the leader fires jobs" do
+  describe "singleton" do
+    test "cron is registered globally via Highlander" do
       name = start_stagehand(crontab: [{"* * * * *", EveryMinuteWorker}])
+      pid = cron_pid(name)
 
-      # Start a second cron process and manually join the same pg group.
-      # Can't use {:via, PgRegistry, ...} since the name is already taken.
-      conf = %Stagehand.Config{
-        name: name,
-        queues: [default: 5],
-        shutdown_grace_period: @timeout,
-        testing: :manual
-      }
-
-      {:ok, cron2} =
-        GenServer.start_link(Cron,
-          conf: conf,
-          crontab: [{"* * * * *", EveryMinuteWorker}]
-        )
-
-      members = for {pid, _} <- PgRegistry.lookup(Stagehand.PgRegistry, {:stagehand_cron, name}), do: pid
-      assert length(members) == 2
-      assert cron2 in members
-
-      leader = Enum.min(members)
-      non_leader = Enum.max(members)
-
-      # Only the leader should insert
-      tick(leader)
-      assert length(Stagehand.Testing.all_enqueued(name, worker: EveryMinuteWorker)) == 1
-
-      # The non-leader should not insert
-      tick(non_leader)
-      assert length(Stagehand.Testing.all_enqueued(name, worker: EveryMinuteWorker)) == 1
+      # Highlander registers under {Highlander, child_spec.id}
+      highlander_pid = :global.whereis_name({Highlander, {Cron, name}})
+      assert is_pid(highlander_pid)
+      assert is_pid(pid)
+      assert pid != highlander_pid
     end
   end
 

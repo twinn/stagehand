@@ -2,8 +2,8 @@ defmodule Stagehand.Plugins.Cron do
   @moduledoc """
   Plugin for scheduling periodic/cron jobs.
 
-  Uses highlander pattern — only the leader node (first in sorted PgRegistry members)
-  fires cron jobs, preventing duplicate scheduling across the cluster.
+  Uses `Highlander` to ensure a single cron process runs across the
+  cluster, preventing duplicate scheduling.
 
   ## Usage
 
@@ -31,14 +31,27 @@ defmodule Stagehand.Plugins.Cron do
 
   defstruct [:conf, :crontab, :timer_ref]
 
+  def child_spec(opts) do
+    conf = opts[:conf]
+
+    inner = %{
+      id: {__MODULE__, conf.name},
+      start: {__MODULE__, :start_link, [opts]}
+    }
+
+    Highlander.child_spec(inner)
+  end
+
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts)
+    conf = opts[:conf]
+    name = {:via, Registry, {Module.concat(conf.name, Registry), :cron}}
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   @impl true
   def init(opts) do
+    Process.flag(:trap_exit, true)
     conf = opts[:conf]
-    {:ok, _} = PgRegistry.register(Stagehand.PgRegistry, {:stagehand_cron, conf.name}, nil)
 
     crontab =
       opts
@@ -59,7 +72,6 @@ defmodule Stagehand.Plugins.Cron do
     now = NaiveDateTime.utc_now()
 
     for {cron, worker, opts} <- state.crontab,
-        leader?(state),
         Crontab.DateChecker.matches_date?(cron, now) do
       job = worker.new(%{}, Keyword.put(opts, :meta, %{"cron" => true}))
       Stagehand.insert(state.conf.name, job)
@@ -71,15 +83,6 @@ defmodule Stagehand.Plugins.Cron do
   def handle_info(_msg, state), do: {:noreply, state}
 
   # -- Private --
-
-  defp leader?(%{conf: conf}) do
-    pids = for {pid, _} <- PgRegistry.lookup(Stagehand.PgRegistry, {:stagehand_cron, conf.name}), do: pid
-
-    case pids do
-      [] -> true
-      members -> self() == Enum.min(members)
-    end
-  end
 
   defp parse_entry({expression, worker}), do: parse_entry({expression, worker, []})
 
