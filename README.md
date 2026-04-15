@@ -1,5 +1,10 @@
 # Stagehand
 
+[![CI](https://github.com/twinn/stagehand/actions/workflows/ci.yml/badge.svg)](https://github.com/twinn/stagehand/actions/workflows/ci.yml)
+[![Hex.pm](https://img.shields.io/hexpm/v/stagehand.svg)](https://hex.pm/packages/stagehand)
+[![Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/stagehand)
+[![License](https://img.shields.io/hexpm/l/stagehand.svg)](https://github.com/twinn/stagehand/blob/main/LICENSE)
+
 An in-memory, GenStage-based background job processing library for Elixir.
 
 Stagehand runs entirely in-memory with no database dependency. It is
